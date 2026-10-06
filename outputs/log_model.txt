@@ -1,0 +1,180 @@
+
+==============================================================================
+STEP 1  |  Loading raw multimodal sensor data
+==============================================================================
+rows (individual sensor samples) : 169,766
+cells                            : ['B0005', 'B0006', 'B0007', 'B0018']
+discharge cycles                 : 636
+ambient temperature              : [24] degC
+
+the three modalities we actually use:
+                        mean    std     min     max
+Voltage_measured       3.504  0.246   1.737   4.035
+Current_measured      -2.005  0.010  -2.029  -1.975
+Temperature_measured  31.985  3.781  22.373  42.084
+
+==============================================================================
+STEP 2  |  Leakage check - why the full cycle is off limits
+==============================================================================
+corr(full discharge duration, capacity label) = 0.9975
+-> 0.997 is not a model, it is the label rewritten. Full-cycle duration,
+   total Ah and total Wh are therefore BANNED from the feature set.
+-> Every feature below is computed from the first 600 s only.
+   Shortest cycle in the data is 2108 s, so the
+   window always exists and we never pad or extrapolate.
+
+==============================================================================
+STEP 3  |  Physics-aware feature engineering
+==============================================================================
+cycles -> feature rows : 636  (dropped 0 with gaps)
+features per cycle     : 15  (8 electrical, 4 thermal, 3 physics couplings)
+SOH range              : 0.577 to 1.018
+                    mean     std     min      max
+r_internal_mohm  109.063  11.840  83.030  148.736
+v_at_60s           3.904   0.039   3.787    3.963
+v_at_300s          3.791   0.053   3.613    3.861
+v_at_600s          3.688   0.068   3.479    3.776
+dvdt_mv_per_s     -0.363   0.055  -0.530   -0.267
+band_39_38_s     220.671  81.854  46.735  345.609
+wh_window          1.262   0.017   1.206    1.294
+i_rms              2.005   0.009   1.989    2.014
+t_rise_k           5.215   0.388   4.203    5.886
+temp_at_600s      29.197   0.742  27.260   32.061
+dtdt_mk_per_s      9.180   0.727   7.343   10.550
+thermal_dose_kh    0.486   0.113   0.185    0.922
+ohmic_heat_wh      0.073   0.008   0.055    0.100
+arrhenius_x1e4     3.300   0.059   3.143    3.535
+heat_per_wh        4.134   0.311   3.362    4.814
+
+==============================================================================
+STEP 4  |  Grouped split - hold out a whole unseen cell
+==============================================================================
+train : ['B0005', 'B0006', 'B0007'] -> 504 cycles
+test  : ['B0018'] -> 132 cycles  (model has never seen this cell)
+
+==============================================================================
+STEP 5  |  Clean data - how do the five fits compare?
+==============================================================================
+                       Model  MAE (SOH)  RMSE (SOH)      R2  MAE (% pts)
+                      RANSAC     0.0108      0.0158  0.9579       1.0812
+              OLS (baseline)     0.0108      0.0158  0.9579       1.0812
+                       Huber     0.0114      0.0168  0.9526       1.1412
+           Quantile (median)     0.0130      0.0174  0.9490       1.3013
+                   Theil-Sen     0.0139      0.0180  0.9455       1.3917
+Baseline: dvdt_mv_per_s only     0.0216      0.0240  0.9035       2.1646
+        Baseline: train mean     0.0703      0.0786 -0.0384       7.0344
+
+==============================================================================
+STEP 5b |  Leave-one-cell-out CV on the training cells
+==============================================================================
+            Model  MAE (SOH)  RMSE (SOH)      R2  MAE (% pts)
+        Theil-Sen     0.0373      0.0441  0.8208       3.7302
+            Huber     0.0522      0.0577  0.6928       5.2155
+Quantile (median)     0.0760      0.0882  0.2818       7.6030
+   OLS (baseline)     0.0996      0.1214 -0.3595       9.9649
+           RANSAC     0.0996      0.1214 -0.3595       9.9649
+
+==============================================================================
+STEP 6  |  Contamination study - inject faulty sensor labels
+==============================================================================
+
+Test MAE in SOH percentage points, as training labels get dirtier:
+Model            Huber  OLS (baseline)  Quantile (median)  RANSAC  Theil-Sen
+Contamination %                                                             
+0                 1.14            1.08               1.30    1.08       1.39
+5                 1.11            2.01               1.29    1.08       1.26
+10                1.17            6.34               1.21    1.08       1.40
+15                1.10            5.60               1.22    1.18       3.13
+20                1.29           30.95               1.25    1.17      22.94
+30                1.15            7.98               1.17    1.08      16.00
+
+Worst-case MAE over all contamination levels (the number that matters):
+   RANSAC               1.18 pp   (  1.1x its own clean error)
+   Huber                1.29 pp   (  1.1x its own clean error)
+   Quantile (median)    1.30 pp   (  1.0x its own clean error)
+   Theil-Sen           22.94 pp   ( 16.5x its own clean error)
+   OLS (baseline)      30.95 pp   ( 28.6x its own clean error)
+
+OLS degrades up to 29x; Huber at most 1.1x. That gap is the whole argument for robust regression.
+Theil-Sen is the instructive failure: its theoretical breakdown point is
+about 29%, and sure enough it holds to 15% and then collapses.
+
+==============================================================================
+STEP 7  |  Explaining the chosen model (Huber)
+==============================================================================
+        feature   modality  std_coef  effect_pp_per_sd  corr_with_soh
+      v_at_600s Electrical    0.2787           27.8725         0.9097
+r_internal_mohm Electrical   -0.2674          -26.7425        -0.5987
+  ohmic_heat_wh    Coupled    0.2423           24.2314        -0.5909
+       v_at_60s Electrical   -0.2019          -20.1887         0.7936
+       t_rise_k    Thermal    0.1613           16.1323        -0.6499
+    heat_per_wh    Coupled   -0.1321          -13.2129        -0.7413
+   temp_at_600s    Thermal    0.0824            8.2433        -0.4332
+ arrhenius_x1e4    Coupled   -0.0694           -6.9430        -0.4675
+  dtdt_mk_per_s    Thermal   -0.0680           -6.7987        -0.6756
+      v_at_300s Electrical   -0.0340           -3.3994         0.8600
+          i_rms Electrical   -0.0283           -2.8277        -0.1915
+      wh_window Electrical   -0.0246           -2.4575         0.4492
+  dvdt_mv_per_s Electrical   -0.0141           -1.4071         0.9669
+thermal_dose_kh    Thermal   -0.0084           -0.8435        -0.4967
+   band_39_38_s Electrical    0.0017            0.1744         0.9287
+
+8 of 15 coefficients keep the same sign in 95% of bootstrap resamples:
+   v_at_600s          +0.2787 SOH per 1 SD  (Electrical)
+   r_internal_mohm    -0.2674 SOH per 1 SD  (Electrical)
+   ohmic_heat_wh      +0.2423 SOH per 1 SD  (Coupled)
+   v_at_60s           -0.2019 SOH per 1 SD  (Electrical)
+   t_rise_k           +0.1613 SOH per 1 SD  (Thermal)
+   temp_at_600s       +0.0824 SOH per 1 SD  (Thermal)
+   dtdt_mk_per_s      -0.0680 SOH per 1 SD  (Thermal)
+   i_rms              -0.0283 SOH per 1 SD  (Electrical)
+
+Worked example - cell B0018, cycle 132:
+   true SOH      67.1%
+   predicted SOH 67.4%
+   intercept     79.4%  then:
+   temp_at_600s       -21.53 pp
+   v_at_600s          -20.13 pp
+   t_rise_k           -17.36 pp
+   arrhenius_x1e4     +14.68 pp
+   r_internal_mohm    -13.49 pp
+
+20 feature pairs are correlated above 0.9 - so individual
+coefficients share credit and must be read as a group, not in isolation:
+   thermal_dose_kh <-> arrhenius_x1e4: 0.998
+   r_internal_mohm <-> ohmic_heat_wh: 0.998
+   v_at_300s <-> v_at_600s: 0.993
+   v_at_60s <-> v_at_300s: 0.988
+   t_rise_k <-> heat_per_wh: 0.980
+
+==============================================================================
+STEP 8  |  Writing figures
+==============================================================================
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f1_soh_trajectories.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f2_multimodal_signals.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f3_feature_correlation.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f4_feature_corr_matrix.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f5_model_comparison.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f6_contamination.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f7_coefficients.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f8_pred_vs_actual.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f9_residuals.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f10_ransac_inliers.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f11_single_cycle_explanation.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/f12_trajectory_heldout.png
+
+==============================================================================
+STEP 9  |  Headline numbers
+==============================================================================
+cycles / features            : 636 / 15
+observation window           : first 600 s of a discharge
+best model on unseen cell    : RANSAC  MAE 1.08 pp, R2 0.958
+chosen model (Huber)        : MAE 1.14 pp, R2 0.953
+predict-the-mean baseline    : MAE 7.03 pp
+cycles within 2 pp           : 77%
+leave-one-cell-out CV, best  : Theil-Sen 3.73 pp  (OLS: 9.96 pp)
+OLS worst case, dirty labels : 30.95 pp (29x its clean error)
+Huber worst case             : 1.29 pp (1.1x its clean error)
+stable coefficients          : 8 of 15
+
+All figures in outputs/figures/, all tables in outputs/.

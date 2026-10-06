@@ -1,0 +1,23 @@
+numbers pulled from the pipeline:
+   huber_mae    1.1412107170106638
+   huber_r2     0.9526202604762124
+   best_mae     1.0812345778822097
+   base_mae     7.03438834598684
+   ols_peak     30.953074511520544
+   ols_blow     28.62752925655375
+   hub_peak     1.2888411900837358
+   hub_blow     1.1293630272416137
+   cv_best      Theil-Sen
+   cv_best_mae  3.730214862992384
+   cv_ols       9.96488322990628
+   top_feat     v_at_600s
+   pc1          91.1435714687598
+   rho_best     0.9631959970977586
+   r_best       0.0119567156944369
+   feat_best    Discharge time
+   p_best       0.1422553105722051
+   n_reject     5
+   n_tests      6
+   med_out      1.7956718003186403
+
+Deck written -> /Users/aayannoori/Desktop/ML-project/ML_Review1_EV_Battery_SOH_AD1.pptx  (12 slides)
