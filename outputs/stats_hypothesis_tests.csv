@@ -1,0 +1,7 @@
+hypothesis,test,statistic,p-value,effect size,verdict
+H1  cells differ in voltage level,Kruskal-Wallis,621.7864461744823,1.7324376713223688e-124,eps^2 = 0.040,reject H0
+H2  equal variance across cells,Levene (median),24.937774996251623,1.0229096401105795e-60,sd range 0.075-0.120 V,reject H0
+H3  voltage higher early than late,Mann-Whitney U,13973454.5,0.0,CLES = 0.982,reject H0
+H4  discharge time shifts with age,Mann-Whitney U,14071110.0,0.0,median 2069s -> 1032s,reject H0
+H5  monotone fade within Cell_01,Spearman rho,-0.959527220834701,0.0,n = 1076,reject H0
+H6  cells differ in RUL (expected null),Kruskal-Wallis,5.866789655517283,0.950866849306142,identical by construction,cannot reject H0

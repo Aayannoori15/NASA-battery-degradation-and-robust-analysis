@@ -1,0 +1,162 @@
+
+==============================================================================
+STEP 1  |  Load and recover the lost cell identifier
+==============================================================================
+rows (cycles)      : 15,064
+columns            : 11 (8 measurements + RUL + cell_id)
+cells recovered    : 14
+cycles per cell    : min 1051, max 1081, median 1077
+missing values     : 0
+duplicate rows     : 0
+RUL (cycles left)  : 0 to 1133
+
+==============================================================================
+STEP 2  |  Descriptive statistics
+==============================================================================
+                                mean    median        std         min         max       IQR    skew  excess_kurtosis  mean/median
+Discharge Time (s)          4581.274  1557.250  33144.012       8.690  958320.370   738.690  16.300          339.993        2.942
+Decrement 3.6-3.4V (s)      1239.785   439.239  15039.589 -397645.908  406703.768   280.400   9.986          253.344        2.823
+Max. Voltage Dischar. (V)      3.908     3.906      0.091       3.043       4.363     0.126  -0.530           11.564        1.001
+Min. Voltage Charg. (V)        3.578     3.574      0.124       3.022       4.379     0.175   0.329            1.145        1.001
+Time at 4.15V (s)           3768.336  2930.203   9129.552    -113.584  245101.117  2259.442  16.238          340.628        1.286
+Time constant current (s)   5461.267  3824.260  25155.845       5.980  880728.100  2448.040  24.723          696.544        1.428
+Charging time (s)          10066.496  8320.415  26415.354       5.980  880728.100   921.360  22.770          587.790        1.210
+Total time (s)             14657.192  9946.195  34710.736      31.690  958471.430  1751.520  14.476          280.986        1.474
+RUL                          554.194   551.000    322.435       0.000    1133.000   562.000   0.006           -1.208        1.006
+
+Red flag: 'Discharge Time (s)' has a mean 2.9x its median
+and an excess kurtosis of 340. A normal
+distribution has excess kurtosis 0. This column is mostly a thin spike
+with a very long tail - i.e. a few cycles where logging ran for days.
+
+==============================================================================
+STEP 3  |  Outlier audit
+==============================================================================
+              feature  IQR outliers %  mod-Z outliers %  max / p99 ratio
+     Total cycle time            5.85              5.70             4.72
+        Charging time            2.95              2.05            13.16
+       Discharge time            2.14              1.87             5.08
+ 3.6->3.4 V decrement            1.89              1.57           297.39
+Max discharge voltage            1.70              1.35             1.03
+   Min charge voltage            1.63              0.15             1.11
+Constant-current time            1.25              1.23            13.20
+       Time at 4.15 V            1.11              1.11             4.66
+
+cycles whose total time exceeds 24 hours : 182 (1.21%)
+median IQR-outlier rate across columns  : 1.8%
+
+These are not interesting physics, they are logging faults - and they are
+exactly why the companion model is fitted with Huber / RANSAC rather than
+ordinary least squares.
+
+==============================================================================
+STEP 4  |  Normality tests
+==============================================================================
+             variable  D'Agostino K2  p (K2)  Shapiro W  p (Shapiro)  p after log1p normal?
+       Discharge time     29973.4910     0.0     0.0691          0.0            0.0      no
+ 3.6->3.4 V decrement     24052.9892     0.0     0.0702          0.0            NaN      no
+Max discharge voltage      3466.4905     0.0     0.9300          0.0            0.0      no
+   Min charge voltage       609.5133     0.0     0.9771          0.0            0.0      no
+       Time at 4.15 V     29927.7245     0.0     0.1408          0.0            NaN      no
+Constant-current time     35993.4116     0.0     0.0581          0.0            0.0      no
+        Charging time     34745.0278     0.0     0.0483          0.0            0.0      no
+     Total cycle time     28356.6181     0.0     0.1480          0.0            0.0      no
+                  RUL     14285.9298     0.0     0.9532          0.0            0.0      no
+
+9 of 9 variables reject normality at alpha=0.05,
+and the log transform does not rescue a single one. Consequence: every
+test below is the rank-based (non-parametric) version. Using a t-test or
+Pearson r here would be reporting a number the data does not support.
+
+==============================================================================
+STEP 5  |  Correlation with RUL - raw values vs ranks
+==============================================================================
+              feature  Pearson r  p (Pearson)  Spearman rho  p (Spearman)  rank gain
+       Discharge time     0.0120       0.1423        0.9632           0.0     0.9512
+       Time at 4.15 V     0.1765       0.0000        0.9557           0.0     0.7792
+ 3.6->3.4 V decrement     0.0120       0.1409        0.9557           0.0     0.9437
+Constant-current time     0.0407       0.0000        0.9530           0.0     0.9123
+Max discharge voltage     0.7828       0.0000        0.9307           0.0     0.1479
+   Min charge voltage    -0.7598       0.0000       -0.8476           0.0     0.0878
+     Total cycle time     0.0268       0.0010        0.8441           0.0     0.8172
+        Charging time     0.0183       0.0247        0.8439           0.0     0.8256
+
+Biggest disagreement: 'Discharge time' scores r=+0.01 but
+rho=+0.96  -  Pearson calls it insignificant (p=0.14) while
+Spearman calls it near-perfect. A gap of 0.95 is not a
+subtlety: it means a handful of extreme cycles are hiding the single
+strongest signal in the dataset from anyone who only computes Pearson r.
+
+After Holm-Bonferroni correction for 8 simultaneous tests, 8 of 8 remain significant.
+
+==============================================================================
+STEP 6  |  Hypothesis tests
+==============================================================================
+                             hypothesis            test  statistic    p-value               effect size          verdict
+      H1  cells differ in voltage level  Kruskal-Wallis      621.8 1.732e-124             eps^2 = 0.040        reject H0
+        H2  equal variance across cells Levene (median)      24.94  1.023e-60    sd range 0.075-0.120 V        reject H0
+     H3  voltage higher early than late  Mann-Whitney U  1.397e+07          0              CLES = 0.982        reject H0
+     H4  discharge time shifts with age  Mann-Whitney U  1.407e+07          0     median 2069s -> 1032s        reject H0
+       H5  monotone fade within Cell_01    Spearman rho    -0.9595          0                  n = 1076        reject H0
+H6  cells differ in RUL (expected null)  Kruskal-Wallis      5.867     0.9509 identical by construction cannot reject H0
+
+5 of 6 tests reject the null at alpha=0.05.
+Reading them in order:
+ - H1/H2: the 14 cells differ in BOTH their typical voltage and their
+   spread, so one pooled model is already an averaging compromise. That is
+   why the companion script holds out whole cells, never random rows.
+ - H3/H4: ageing is unmistakable - a random early-life cycle outranks a
+   late-life one 98.2% of the time, and median discharge time
+   halves from 2069s to 1032s.
+ - H5: within a single cell the fade is almost perfectly monotone
+   (rho = -0.96), which is the clean signal a linear model can use.
+ - H6 is the useful failure: RUL cannot tell the cells apart because RUL
+   is a countdown added by the dataset authors, not something measured.
+
+==============================================================================
+STEP 7  |  PCA on rank-transformed features
+==============================================================================
+   PC1:  91.1% of variance, cumulative  91.1%
+   PC2:   4.9% of variance, cumulative  96.1%
+   PC3:   2.1% of variance, cumulative  98.2%
+   PC4:   0.7% of variance, cumulative  98.9%
+   PC5:   0.6% of variance, cumulative  99.5%
+   PC6:   0.3% of variance, cumulative  99.8%
+   PC7:   0.1% of variance, cumulative  99.9%
+   PC8:   0.1% of variance, cumulative 100.0%
+
+1 component already carries 80% of the variance in 8 columns -
+the measurements are largely restatements of one underlying thing:
+how far through its life the cell is.
+
+==============================================================================
+STEP 8  |  Writing figures
+==============================================================================
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s1_distributions.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s2_qq_normality.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s3_outliers.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s4_correlation.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s5_best_relationship.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s6_per_cell_ageing.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s7_group_comparison.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s8_pca.png
+   figure saved -> /Users/aayannoori/Desktop/ML-project/outputs/figures/s9_rul_and_balance.png
+
+==============================================================================
+STEP 9  |  Conclusions that feed straight into the model
+==============================================================================
+1. 15,064 cycles from 14 cells, zero missing values,
+   zero duplicates - but the cell label had to be rebuilt from cycle resets.
+2. Not one of 9 variables is Gaussian (all reject at alpha=0.05),
+   and a log transform fixes none of them -> use rank-based statistics.
+3. Median 1.8% of cycles are IQR outliers and 182 cycles
+   claim to last over a day -> the model must be fitted robustly.
+4. Spearman beats Pearson on 8 of 8 features;
+   the strongest monotone signal is 'Discharge time' at rho = +0.96.
+5. 5 of 6 hypotheses reject H0; the cells differ in both level
+   and spread, and ageing within a cell is almost perfectly monotone
+   -> validate by holding out whole cells, never random rows.
+6. 1 principal component explains 80% of 8 columns (91% in PC1 alone) -> the measurements
+   are mostly one latent variable, so a LINEAR model is a fair starting point.
+
+All figures in outputs/figures/, all tables in outputs/.
